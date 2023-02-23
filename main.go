@@ -49,7 +49,6 @@ func (l *lexer) Next() (value []rune, hasNext bool) {
 		for n < len(l.content) && l.content[n] != '>' {
 			n++
 		}
-		// token := l.content[0:n+1]
 		l.content = l.content[n+1:]
 		return nil, true
 	}
@@ -96,59 +95,58 @@ type TfIdf = map[string]float32
 type PathTfIdf = map[string]TfIdf
 
 func calculateTF(count int, document TermFreq) float32 {
-    var sumOfTerms int = 0
-    for _, v := range document {
-        sumOfTerms += v
-    }
-    return float32(count) / float32(sumOfTerms)
+	var sumOfTerms int = 0
+	for _, v := range document {
+		sumOfTerms += v
+	}
+	return float32(count) / float32(sumOfTerms)
 }
 
-func calculateIDF(numberOfDocs int, numberOfDocsWithTerm int) float32  {
-    return float32(math.Log(float64(numberOfDocs)/float64(1+numberOfDocsWithTerm)))
+func calculateIDF(numberOfDocs int, numberOfDocsWithTerm int) float32 {
+	return float32(math.Log(float64(numberOfDocs) / float64(1+numberOfDocsWithTerm)))
 }
 
 func numOfDocsWithTerm(term string, table TermFreqTable) int {
-    var numOfDocsWithTerm int = 0
-    for _, document := range table {
-        if _, ok := document[term]; ok {
-            numOfDocsWithTerm++
-        }
-    }
-    return numOfDocsWithTerm
+	var numOfDocsWithTerm int = 0
+	for _, document := range table {
+		if _, ok := document[term]; ok {
+			numOfDocsWithTerm++
+		}
+	}
+	return numOfDocsWithTerm
 }
 
 func calculateTFIDF(table TermFreqTable) PathTfIdf {
-    t := make(PathTfIdf)
-    numOfDocs := len(table)
+	t := make(PathTfIdf)
+	numOfDocs := len(table)
 
-    for path, document := range table {
-        log.Printf("Calculating: %s", path)
-        t[path] = make(TfIdf)
-        for term, count := range document {
-            tf := calculateTF(count, document)
-            idf := calculateIDF(numOfDocs, numOfDocsWithTerm(term, table))
-            tfidf := tf * idf
-            // log.Println(tfidf)
-            // log.Println(t[path][term])
-            t[path][term] = tfidf
-        }
-    }
+	for path, document := range table {
+		log.Printf("Calculating: %s", path)
+		t[path] = make(TfIdf)
+		for term, count := range document {
+			tf := calculateTF(count, document)
+			idf := calculateIDF(numOfDocs, numOfDocsWithTerm(term, table))
+			tfidf := tf * idf
+			t[path][term] = tfidf
+		}
+	}
 
-    return t
+	return t
 }
 
-func main() {
-	paths, err := readDir("docs.gl/gl4")
+func generateTft(dirPath string) (TermFreqTable, error) {
+	paths, err := readDir(dirPath)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	tft := make(TermFreqTable)
 
 	for _, filePath := range paths {
+		log.Printf("Indexing: %s", filePath)
 		content, err := readFile(filePath)
 		if err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 
 		tf := make(TermFreq)
@@ -178,21 +176,22 @@ func main() {
 		}
 
 		tft[filePath] = tf
-
-		// log.Println(filePath)
-
-		// for t, f := range tf {
-		// 	log.Printf("    %s => %d", t, f)
-		// }
-		// log.Println("")
 	}
 
-    t := calculateTFIDF(tft)
+	return tft, nil
+}
+
+func main() {
+	tft, err := generateTft("docs.gl/gl4")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	t := calculateTFIDF(tft)
 
 	json, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		log.Fatal(err)
 	}
 	os.WriteFile("index.json", json, 0666)
-	// log.Println(string(json))
 }
