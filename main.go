@@ -113,12 +113,6 @@ func numOfDocsWithTerm(term string, table TermFreqTable) int {
         if _, ok := document[term]; ok {
             numOfDocsWithTerm++
         }
-        // for t := range document {
-        //     if(term == t){
-        //         numOfDocsWithTerm++
-        //         break
-        //     }
-        // }
     }
     return numOfDocsWithTerm
 }
