@@ -103,7 +103,7 @@ func calculateTF(count int, document TermFreq) float32 {
 }
 
 func calculateIDF(numberOfDocs int, numberOfDocsWithTerm int) float32 {
-	return float32(math.Log(float64(numberOfDocs) / float64(1+numberOfDocsWithTerm)))
+	return float32(math.Log(float64(numberOfDocs) / math.Max(float64(numberOfDocsWithTerm), 1)))
 }
 
 func numOfDocsWithTerm(term string, table TermFreqTable) int {
@@ -127,7 +127,9 @@ func calculateTFIDF(table TermFreqTable) PathTfIdf {
 			tf := calculateTF(count, document)
 			idf := calculateIDF(numOfDocs, numOfDocsWithTerm(term, table))
 			tfidf := tf * idf
-			t[path][term] = tfidf
+			if tfidf > 0 {
+				t[path][term] = tfidf
+			}
 		}
 	}
 
@@ -168,9 +170,9 @@ func generateTft(dirPath string) (TermFreqTable, error) {
 			}
 
 			// omit everything less or equal than 2 chars to make table smaller
-			if len(token) <= 2 {
-				continue
-			}
+			// if len(token) <= 2 {
+			// 	continue
+			// }
 
 			tf[string(token)]++
 		}
