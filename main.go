@@ -90,9 +90,10 @@ func readDir(dirPath string) ([]string, error) {
 
 type TermFreq = map[string]int
 type TermFreqTable = map[string]TermFreq
+type DocFreq = map[string]int
 
-type TfIdf = map[string]float32
-type PathTfIdf = map[string]TfIdf
+// type TfIdf = map[string]float32
+// type PathTfIdf = map[string]TfIdf
 
 func calculateTF(count int, document TermFreq) float32 {
 	var sumOfTerms int = 0
@@ -183,7 +184,74 @@ func generateTft(dirPath string) (TermFreqTable, error) {
 	return tft, nil
 }
 
+type Model struct {
+	tf TermFreqTable
+	df DocFreq
+}
+
+func newModel() *Model {
+	return &Model{
+		tf: make(map[string]map[string]int),
+		df: make(map[string]int),
+	}
+}
+
+func (m *Model) saveAsJson(path string) error {
+	json, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		log.Fatal(err)
+	}
+	return os.WriteFile("index.json", json, 0666)	
+}
+
+func (m *Model) indexFolder(path string) error {
+	paths, err := readDir(path)
+	if err != nil {
+		return err
+	}
+
+	for _, filePath := range paths {
+		log.Printf("Indexing: %s", filePath)
+		content, err := readFile(filePath)
+		if err != nil {
+			return err
+		}
+
+		tf := make(TermFreq)
+
+		lexer := NewLexer([]rune(string(content)))
+
+		for {
+			token, hasNext := lexer.Next()
+			if !hasNext {
+				break
+			}
+
+			if token == nil {
+				continue
+			}
+
+			for i := range token {
+				token[i] = unicode.ToUpper(token[i])
+			}
+
+			// omit everything less or equal than 2 chars to make table smaller
+			// if len(token) <= 2 {
+			// 	continue
+			// }
+
+			tf[string(token)]++
+		}
+
+		tft[filePath] = tf
+	}
+}
+
 func main() {
+
+	model := newModel()
+	model.indexFolder("docs.gl/gl4")
+
 	tft, err := generateTft("docs.gl/gl4")
 	if err != nil {
 		log.Fatalln(err)
@@ -191,9 +259,5 @@ func main() {
 
 	t := calculateTFIDF(tft)
 
-	json, err := json.MarshalIndent(t, "", "  ")
-	if err != nil {
-		log.Fatal(err)
-	}
-	os.WriteFile("index.json", json, 0666)
+
 }
