@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"sort"
 	"unicode"
 )
 
@@ -92,108 +93,43 @@ type TermFreq = map[string]int
 type TermFreqTable = map[string]TermFreq
 type DocFreq = map[string]int
 
-// type TfIdf = map[string]float32
-// type PathTfIdf = map[string]TfIdf
-
-func calculateTF(count int, document TermFreq) float32 {
+func calculateTF(term string, tfTable TermFreq) float32 {
+	// TODO: cache this
 	var sumOfTerms int = 0
-	for _, v := range document {
+	for _, v := range tfTable {
 		sumOfTerms += v
 	}
-	return float32(count) / float32(sumOfTerms)
+	return float32(tfTable[term]) / float32(sumOfTerms)
 }
 
-func calculateIDF(numberOfDocs int, numberOfDocsWithTerm int) float32 {
-	return float32(math.Log(float64(numberOfDocs) / math.Max(float64(numberOfDocsWithTerm), 1)))
-}
-
-func numOfDocsWithTerm(term string, table TermFreqTable) int {
-	var numOfDocsWithTerm int = 0
-	for _, document := range table {
-		if _, ok := document[term]; ok {
-			numOfDocsWithTerm++
-		}
-	}
-	return numOfDocsWithTerm
-}
-
-func calculateTFIDF(table TermFreqTable) PathTfIdf {
-	t := make(PathTfIdf)
-	numOfDocs := len(table)
-
-	for path, document := range table {
-		log.Printf("Calculating: %s", path)
-		t[path] = make(TfIdf)
-		for term, count := range document {
-			tf := calculateTF(count, document)
-			idf := calculateIDF(numOfDocs, numOfDocsWithTerm(term, table))
-			tfidf := tf * idf
-			if tfidf > 0 {
-				t[path][term] = tfidf
-			}
-		}
-	}
-
-	return t
-}
-
-func generateTft(dirPath string) (TermFreqTable, error) {
-	paths, err := readDir(dirPath)
-	if err != nil {
-		return nil, err
-	}
-
-	tft := make(TermFreqTable)
-
-	for _, filePath := range paths {
-		log.Printf("Indexing: %s", filePath)
-		content, err := readFile(filePath)
-		if err != nil {
-			return nil, err
-		}
-
-		tf := make(TermFreq)
-
-		lexer := NewLexer([]rune(string(content)))
-
-		for {
-			token, hasNext := lexer.Next()
-			if !hasNext {
-				break
-			}
-
-			if token == nil {
-				continue
-			}
-
-			for i := range token {
-				token[i] = unicode.ToUpper(token[i])
-			}
-
-			// omit everything less or equal than 2 chars to make table smaller
-			// if len(token) <= 2 {
-			// 	continue
-			// }
-
-			tf[string(token)]++
-		}
-
-		tft[filePath] = tf
-	}
-
-	return tft, nil
+func calculateIDF(df int, n int) float32 {
+	return float32(math.Log(float64(n) / math.Max(float64(df), 1)))
 }
 
 type Model struct {
-	tf TermFreqTable
-	df DocFreq
+	TF TermFreqTable `json:"tf"`
+	DF DocFreq       `json:"df"`
 }
 
 func newModel() *Model {
 	return &Model{
-		tf: make(map[string]map[string]int),
-		df: make(map[string]int),
+		TF: make(map[string]map[string]int),
+		DF: make(map[string]int),
 	}
+}
+
+func newModelFromJson(path string) (*Model, error) {
+	data, err := readFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var model Model
+	if err := json.Unmarshal(data, &model); err != nil {
+		return nil, err
+	}
+
+	return &model, nil
 }
 
 func (m *Model) saveAsJson(path string) error {
@@ -201,7 +137,7 @@ func (m *Model) saveAsJson(path string) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	return os.WriteFile("index.json", json, 0666)	
+	return os.WriteFile(path, json, 0666)
 }
 
 func (m *Model) indexFolder(path string) error {
@@ -243,21 +179,92 @@ func (m *Model) indexFolder(path string) error {
 			tf[string(token)]++
 		}
 
-		tft[filePath] = tf
+		for t := range tf {
+			m.DF[t] += 1
+		}
+
+		m.TF[filePath] = tf
+
 	}
+	return nil
 }
 
-func main() {
+func tokenize(term string) []string {
+	lexer := NewLexer([]rune(string(term)))
+	result := make([]string, 0)
 
-	model := newModel()
-	model.indexFolder("docs.gl/gl4")
+	for {
+		token, hasNext := lexer.Next()
+		if !hasNext {
+			break
+		}
 
-	tft, err := generateTft("docs.gl/gl4")
-	if err != nil {
-		log.Fatalln(err)
+		if token == nil {
+			continue
+		}
+
+		for i := range token {
+			token[i] = unicode.ToUpper(token[i])
+		}
+
+		// omit everything less or equal than 2 chars to make table smaller
+		// if len(token) <= 2 {
+		// 	continue
+		// }
+
+		result = append(result, string(token))
 	}
 
-	t := calculateTFIDF(tft)
+	return result
+}
 
+func (m *Model) search(query string) SearchResults {
+	result := make(SearchResults, 0)
+	tokens := tokenize(query)
+
+	for path, tfTable := range m.TF {
+		var rank float32 = 0
+		for _, token := range tokens {
+			rank += calculateTF(token, tfTable) * calculateIDF(m.DF[token], len(m.TF))
+		}
+
+		result = append(result, SearchResult{
+			Path: path,
+			Rank: rank,
+		})
+	}
+
+	// result = sortMap(result)
+
+	sort.Sort(sort.Reverse(result))
+
+	return result
+}
+
+type SearchResult struct {
+	Path string
+	Rank float32
+}
+type SearchResults []SearchResult
+
+func (a SearchResults) Len() int           { return len(a) }
+func (a SearchResults) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a SearchResults) Less(i, j int) bool { return a[i].Rank < a[j].Rank }
+
+func main() {
+	model, err := newModelFromJson("index-new.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	// model := newModel()
+	// model.indexFolder("docs.gl/gl4")
+
+	searchResult := model.search(os.Args[1])
+	// log.Println(searchResult[:10])
+	for _, v := range searchResult[:10] {
+		log.Printf("%s => %f", v.Path, v.Rank)
+	}
+
+	// model.saveAsJson("index-new.json")
 
 }
